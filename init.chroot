@@ -1,0 +1,118 @@
+#!/bin/bash
+
+LOG=/setup.log
+
+#OS name
+#SYSTEM=ubuntu
+#OS version
+#DIST=raring
+#HOSTNAME="$SYSTEM-$ARCH"
+#Language settings
+#LOC_LANG=ru_RU
+#LANGUAGE="ru:en"
+#Card type
+#CARD="vexpress-a9"
+
+[ "$1" != "" ] && CARD="$1"
+[ "$2" != "" ] && HOSTNAME="$2"
+[ "$3" != "" ] && SYSTEM="$3"
+[ "$4" != "" ] && DIST="$4"
+[ "$5" != "" ] && LOC_LANG="$5"
+[ "$6" != "" ] && LANGUAGE="$6"
+
+execute() {
+  echo "run-chroot> $*" >/dev/tty
+  echo "run-chroot> $*" >>"$LOG"
+  eval $* 2>&1 | tee -a "$LOG"
+}
+
+echo
+echo "… and use it to finish the deployment:"
+echo "… CARD=$CARD HOSTNAME=$HOSTNAME SYSTEM=$SYSTEM DIST=$DIST LOC_LANG=$LOC_LANG LANGUAGE=$LANGUAGE"
+echo
+
+
+if [ ! -x ./debootstrap/debootstrap ] ; then
+  echo
+  echo "ERROR! debootstrap not found! EXIT."
+  echo
+fi
+
+execute ./debootstrap/debootstrap --second-stage
+
+#FIXME - it depends on SYSTEM,DIST,CARD
+KEYSERVER="keyserver.ubuntu.com"
+KEYS="428D7C01"
+execute apt-key adv --keyserver "$KEYSERVER" --recv-keys "$KEYS"
+
+echo
+echo "From then on, you can install stuff as required (this is my base setup):"
+echo
+execute mv /my_pkg_sources.list /etc/apt/sources.list
+execute apt-get update
+
+echo
+echo Setup and configure locales ...
+echo
+LANG="$LOC_LANG.UTF-8"
+execute locale-gen en_US en_US.UTF-8 "$LOC_LANG" "$LANG"
+execute dpkg-reconfigure locales
+
+echo
+echo Install packages ...
+echo
+
+apt-get install kbd
+
+PKGLIST="/pkgs.install*"
+for f in $PKGLIST ; do
+  if [ -r "$f" ] ; then
+    echo
+    echo "Install packages from list \"$f\""
+    echo
+    execute apt-get install --no-install-recommends --assume-yes $(<$f)
+  fi
+done
+
+echo
+echo Download packages ...
+echo
+echo "echo ===================================================="	 >/etc/profile.d/run-once.sh
+echo "echo Running commands from /etc/profile.d/run-once.sh ..."	>>/etc/profile.d/run-once.sh
+echo "echo ===================================================="	>>/etc/profile.d/run-once.sh
+PKGLIST="/pkgs.download*"
+for f in $PKGLIST ; do
+  if [ -r "$f" ] ; then
+    echo
+    echo "Download packages from list \"$f\""
+    echo
+    execute apt-get -d install --no-install-recommends --assume-yes $(<$f)
+    execute echo apt-get install --no-install-recommends --assume-yes $(<$f) >>/etc/profile.d/run-once.sh
+  fi
+done
+execute echo rm -f /etc/profile.d/run-once.sh				>>/etc/profile.d/run-once.sh
+
+dpkg-reconfigure tzdata
+execute passwd root
+execute adduser admin
+execute usermod -aG sudo admin
+
+echo
+echo "Created file \"/etc/profile.d/run-once.sh\":"
+echo
+cat /etc/profile.d/run-once.sh
+
+echo
+echo "Even though this is not really necessary for an Android chroot, you should also set"
+echo "up a serial console in case you ever need to run this under QEMU again (1):"
+echo
+
+execute cp /etc/init/tty1.conf /etc/init/ttyAMA0.conf
+execute sed -i "s/tty1/ttyAMA0/" /etc/init/ttyAMA0.conf
+
+echo
+echo "Next up, exit the chroot."
+echo
+
+exit 0
+

@@ -1,0 +1,58 @@
+#!/bin/bash
+
+if [ "$(id -u)" != "0" ] ; then
+  exec sudo $0 $1 $2 $3 $4 $5
+fi
+
+IPCMD="/sbin/ip"
+IFCONFIG="/sbin/ifconfig"
+IPTABLES="/sbin/iptables"
+SERVICE="/usr/sbin/service"
+SYSCTL="/sbin/sysctl"
+QEMU="/usr/bin/qemu-system-arm"
+RM="/bin/rm"
+
+if [ -r ./SYSTEM ] ; then
+  . ./SYSTEM
+fi
+
+LOCAL_IFACE=tap0
+EXT_IFACE=eth0
+
+$SYSCTL -n net.ipv4.ip_forward >.ip_forward
+$SYSCTL net.ipv4.ip_forward=1
+
+#$IPCMD tuntap del $LOCAL_IFACE mode tap
+$IPCMD tuntap add dev $LOCAL_IFACE mode tap
+
+#$IFCONFIG $LOCAL_IFACE $GATEWAY netmask $MASK up
+$IPCMD address add dev $LOCAL_IFACE local $GATEWAY/$MASK broadcast +
+$IPCMD link set dev $LOCAL_IFACE up
+
+$IPTABLES -A INPUT -i $LOCAL_IFACE -j ACCEPT
+$IPTABLES -A FORWARD -i $LOCAL_IFACE -j ACCEPT
+$IPTABLES -t nat -A POSTROUTING -o $EXT_IFACE -j MASQUERADE
+
+$SERVICE bind9 restart
+
+$QEMU \
+  -M vexpress-a9 \
+  -kernel boot/$CARD-$DIST/vmlinuz* \
+  -initrd boot/$CARD-$DIST/initrd.img* \
+  -sd "$IMG" \
+  -append "root=/dev/mmcblk0" \
+  -net nic,macaddr=00:16:3e:00:00:01,vlan=0 \
+  -net tap,vlan=0,ifname=tap0
+#   -m 1G \
+ #  -smp 2 \
+
+if [ -r .ip_forward ] ; then
+  $SYSCTL net.ipv4.ip_forward=$(<.ip_forward)
+  $RM .ip_forward
+fi
+
+$IPTABLES -D INPUT -i $LOCAL_IFACE -j ACCEPT
+$IPTABLES -D FORWARD -i $LOCAL_IFACE -j ACCEPT
+$IPTABLES -t nat -D POSTROUTING -o $EXT_IFACE -j MASQUERADE
+$IPCMD tuntap del $LOCAL_IFACE mode tap
+$SERVICE bind9 restart

@@ -1,0 +1,12 @@
+#!/bin/bash
+
+WD=$PWD
+
+export ARCH=arm
+export CROSS_COMPILE=arm-linux-gnueabihf-
+
+#${CROSS_COMPILE}gcc -static init.c -o init
+#echo init|cpio -o --format=newc > init.test
+
+mkinitramfs -o boot/initrd.img-3.5.0 3.5.0
+

@@ -1,0 +1,59 @@
+#!/bin/bash
+
+echo
+echo "Are Uou sure you REALLY want to delete all temporary files and subdirectories?"
+echo "Say \"yes\" if it is so, or anything else, or just press ENTER if no."
+echo
+read A
+
+[ "$A" != "yes" ] && exit 0 ;
+
+echo
+echo "OK. Now you have last chance to stop cleaning by pressing Ctrl-C. Or press enter to begin..."
+echo
+read A
+
+#Target architecture
+ARCH=armhf
+#OS name
+SYSTEM=ubuntu
+#OS version
+DIST=quantal
+HOSTNAME="ubuntu"
+#Network
+#IFACE=eth0
+IFTYPE=dhcp
+#IP=10.33.33.2
+MASK=255.255.255.0
+#GATEWAY=10.33.33.1
+#DNS="$GATEWAY"
+#Language settings
+LOC_LANG=ru_RU
+LANGUAGE="ru:en"
+#Rootfs file
+IMG="$HOSTNAME-$ARCH.img"
+#Size in megabytes
+IMGSIZE=$((4*1024*1024))
+#Card type
+CARD="vexpress-a9"
+#Processor type (FIXME - it depends on card type)
+CPU="cortex-a9"
+
+if [ -r ./SYSTEM ] ; then
+. ./SYSTEM
+fi
+
+execute() {
+  echo "run> $*" >/dev/tty
+  eval $*
+}
+
+[ -r "$IMG" ] && execute sudo rm "$IMG"
+[ -d ./apt/archives ] && execute sudo rm -rf ./apt/archives/*
+[ -d ./apt/keyrings ] && execute sudo rm -rf ./apt/keyrings/*
+[ -d ./apt/lists ] && execute sudo rm -rf ./apt/lists/*
+[ -d ./boot/$CARD-$DIST ] && execute sudo rm -rf ./boot/$CARD-$DIST/*
+
+echo
+echo "Done."
+echo

@@ -1,0 +1,8 @@
+#Special card sources list (if any)
+deb http://ports.ubuntu.com/ubuntu-ports/ raring main universe restricted multiverse
+deb-src http://ports.ubuntu.com/ubuntu-ports/ raring main universe restricted multiverse #Added by software-properties
+deb http://ports.ubuntu.com/ubuntu-ports/ raring-security universe restricted multiverse main
+deb http://ports.ubuntu.com/ubuntu-ports/ raring-updates universe restricted multiverse main
+deb http://ports.ubuntu.com/ubuntu-ports/ raring-proposed universe restricted multiverse main
+deb http://ports.ubuntu.com/ubuntu-ports/ raring-backports universe restricted multiverse main
+deb http://ports.ubuntu.com raring main restricted universe

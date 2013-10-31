@@ -1,0 +1,16 @@
+#!/bin/bash
+
+. SYSTEM
+
+if [ ! -d ./mnt ] ; then
+
+  mkdir -p ./mnt
+  sudo mount -o loop "$IMG" ./mnt
+
+else
+
+  sudo umount ./mnt
+  rmdir ./mnt
+
+fi
+

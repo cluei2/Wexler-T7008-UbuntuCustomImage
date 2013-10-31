@@ -1,0 +1,35 @@
+#Target architecture
+ARCH=armhf
+
+#OS name
+SYSTEM=ubuntu
+#OS version
+#release name
+#DIST=raring
+DIST=quantal
+
+HOSTNAME="$SYSTEM-$ARCH"
+
+#Network сщташпгкфешщт
+IFACE=eth0
+IFTYPE=static
+IP=10.33.33.2
+MASK=255.255.255.0
+GATEWAY=10.33.33.1
+DNS="10.33.33.1 8.8.8.8"
+
+#Language settings
+LOC_LANG=ru_RU
+LANGUAGE="ru:en"
+
+#Card type
+#CARD="vexpress-a9"
+CARD="allwinner-a10"
+#Processor type (fixme-depends on card type)
+CPU="cortex-a8"
+
+#Rootfs file
+IMG="$HOSTNAME-$DIST-$CARD.img"
+
+#Size in megabytes
+IMGSIZE=$((6*1024*1024))

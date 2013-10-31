@@ -1,0 +1,147 @@
+#!/bin/sh
+# Copyright (C) 2009-2010 Canonical
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the "Software"),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+# SOFTWARE IN THE PUBLIC INTEREST, INC. BE LIABLE FOR ANY CLAIM, DAMAGES OR
+# OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+# ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+#
+# Except as contained in this notice, the name of the author shall not be used
+# in advertising or otherwise to promote the sale, use or other dealings in
+# this Software without prior written authorization from the author.
+
+set -e
+
+log() {
+    echo "$*" >&2
+}
+
+log_run() {
+    log "Running" "$@"
+    "$@"
+}
+
+die() {
+    log "$@"
+    exit 1
+}
+
+hex2dec() {
+    printf "%d\n" "$1"
+}
+
+SECTOR_BYTES=512
+SECTORS_PER_TRACK=64
+BYTES_PER_TRACK=$(( $SECTORS_PER_TRACK * $SECTOR_BYTES ))
+
+IMAGE="$1"
+KERNEL="$2"
+UBOOT_BIN="$3"
+IMAGE_SIZE=$(( ( ( $4 * 0x100000 ) / $BYTES_PER_TRACK + 1 ) * $BYTES_PER_TRACK ))
+INITRD="$5"
+
+log "image size: $IMAGE_SIZE"
+
+MBR_SIZE=512
+uboot_bin_size=`stat -c %s "$UBOOT_BIN"`
+UBOOT_SIZE=$((0x100000 - 0x200))
+
+UIMAGE_SIZE=`printf "%d" 0x800000`
+UIMAGE_START=$(( $MBR_SIZE + $UBOOT_SIZE ))
+UINITRD_SIZE=`printf "%d" 0x1000000`
+UINITRD_START=$(( $UIMAGE_START + $UIMAGE_SIZE ))
+
+BOOT_PART_END=$(( (($UINITRD_START + $UINITRD_SIZE) / $BYTES_PER_TRACK + 1) * $BYTES_PER_TRACK ))
+
+log boot part end: $BOOT_PART_END
+
+FS_PART_START=$(( $BOOT_PART_END ))
+FS_PART_SIZE=$(( $IMAGE_SIZE - ( $BOOT_PART_END - 1)))
+FS_PART_END=$(( $IMAGE_SIZE - 1 ))
+
+cleanup() {
+    if [ -n "$BOOT_IMG" ]; then
+        rm -f "$BOOT_IMG"
+    fi
+    if [ -n "$UIMAGE" ]; then
+        rm -f "$UIMAGE"
+    fi
+    if [ -n "$UINITRD" ]; then
+        rm -f "$UINITRD"
+    fi
+}
+
+trap "cleanup" 0 1 2 3 9 11 13 15
+
+self="$(basename "$0")"
+BOOT_IMG="`mktemp -t "$self.boot.img.XXXXXXXXXX"`"
+UIMAGE="`mktemp -t "$self.uImage.XXXXXXXXXX"`"
+UINITRD="`mktemp -t "$self.uInitrd.XXXXXXXXXX"`"
+
+# create the blank disk image (and this is a sparse file)
+log_run dd if=/dev/zero of="$IMAGE" bs="$(( $IMAGE_SIZE ))" count=1
+
+# create MBR
+log "initializing disk label (MBR and partition table)..."
+log_run parted -s "$IMAGE" mklabel msdos
+
+# create uboot partition
+log "creating uboot partition..."
+
+
+# create both partitions
+log_run parted -s "$IMAGE" mkpart primary fat32 "${MBR_SIZE}B" "$(($FS_PART_START - 1))B"
+log_run parted -s "$IMAGE" mkpart primary fat32 "${FS_PART_START}B" "${FS_PART_END}B"
+
+# hackish way to set partition type to "Non-FS data" (0xda); neither parted
+# not fdisk work well in all cases here; fdisk will complain about lack of
+# number of cylinders, and parted doesn't take arbitrary ids
+# partition table starts at 0x01BE, partition type is at +0x04
+PART1_ID_OFFSET="$(hex2dec 0x1c2)"
+# NB: log_run output would be swallowed anyway
+bash -c "printf '\xda' | dd conv=notrunc bs="$PART1_ID_OFFSET" of="$IMAGE" seek=1 2>/dev/null"
+
+BOOT_SIZE=$FS_PART_SIZE
+log "Creating /boot filesystem in $BOOT_IMG with size ${BOOT_SIZE}B"
+log_run dd if=/dev/zero of="$BOOT_IMG" bs=512 count="$(($BOOT_SIZE / 512))"
+mkdosfs "$BOOT_IMG"
+
+echo "creating uImage with $KERNEL"
+mkimage -A arm -O linux -T kernel -C none -a 0x90800000 -e 0x90800000 -n LinuxRocks -d "$KERNEL" "$UIMAGE"
+
+# copy kernel and initramfs in place here
+
+mcopy -i "$BOOT_IMG" "$UIMAGE" ::uimage
+if test -n "$INITRD"; then
+    echo "creating uInitrd with $INITRD"
+    mkimage -A arm -O linux -T ramdisk -C none -a 0 -e 0 -n LinuxRocks -d "$INITRD" "$UINITRD"
+    mcopy -i "$BOOT_IMG" "$UINITRD" ::uinitrd
+else
+    echo "skipping uInitrd - no parameter provided"
+fi
+
+log "writing uboot... ($MBR_SIZE)"
+log_run dd conv=notrunc bs="$MBR_SIZE" if="$UBOOT_BIN" of="$IMAGE" seek=1 skip=1
+
+log "writing uimage... ($UIMAGE_START)"
+log_run dd conv=notrunc bs="$UIMAGE_START" if="$UIMAGE" of="$IMAGE" seek=1 skip=0
+
+log "writing uinitrd... ($UINITRD_START)"
+log_run dd conv=notrunc bs="$UINITRD_START" if="$UINITRD" of="$IMAGE" seek=1 skip=0
+
+# TODO initrd
+
+log_run dd conv=notrunc bs="${FS_PART_START}" if="$BOOT_IMG" of="$IMAGE" seek=1

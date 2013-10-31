@@ -1,0 +1,253 @@
+#!/bin/bash
+
+if [ "$(id -u)" != "0" ] ; then
+  exec sudo $0 $1 $2 $3 $4 $5
+fi
+
+#Target architecture
+ARCH=armhf
+#OS name
+SYSTEM=ubuntu
+#OS version
+DIST=quantal
+HOSTNAME="ubuntu"
+#Network
+#IFACE=eth0
+IFTYPE=dhcp
+#IP=10.33.33.2
+MASK=255.255.255.0
+#GATEWAY=10.33.33.1
+#DNS="$GATEWAY"
+#Language settings
+LOC_LANG=ru_RU
+LANGUAGE="ru:en"
+#Rootfs file
+IMG="$HOSTNAME-$ARCH.img"
+#Size in megabytes
+IMGSIZE=$((4*1024*1024))
+#Card type
+CARD="vexpress-a9"
+#Processor type (FIXME - it depends on card type)
+CPU="cortex-a9"
+
+if [ -r ./SYSTEM ] ; then
+. ./SYSTEM
+fi
+
+if [ ! -d ./cards/$CARD-$DIST ] ; then
+  echo "WARNING!!!"
+  echo "Directory ./cards/$CARD-$DIST does not exist. Probably this card not supported!"
+  echo "==============================================================================="
+  echo
+  read A
+fi
+
+execute() {
+  echo "run> $*" >/dev/tty
+  eval $*
+}
+
+echo "Sourse from:"
+echo "http://taoofmac.com/space/blog/2013/04/28/2330#how-to-install-ubuntu-13-04-on-your-android-phone"
+echo
+echo "First off, and for the more general case where you’ll be using an Intel machine"
+echo "to get this going, you need to set up QEMU and ARM binary support as well as debootstrap:"
+echo
+
+execute apt-get install debootstrap qemu-user-static qemu-system git gcc-arm-linux-gnueabihf binfmt-support 1>&2 2>/dev/null
+
+echo
+echo "Now create the filesystem itself (this is for a 2GB image) and mount it under ./mnt"
+echo "Since we don’t need all the bells and whistles of ext3/ext4 (after all, the end result"
+echo "will be running inside a file), we’ll be building everything inside an ext2(3) filesystem:"
+echo
+if [ -r "$IMG" ] ; then
+  SIZE=$(stat -c %s "$IMG")
+else
+  SIZE=0
+fi
+
+HAVESIZE=$(($SIZE/1024))
+if [ "$IMGSIZE" != "$HAVESIZE" ] ; then
+  execute dd if=/dev/zero of="$IMG" bs=1024 count="$IMGSIZE"
+  FORMAT=y
+else
+  echo
+  echo "Image \"$IMG\" with required size $IMGSIZE always present"
+  echo
+  echo "Init filesystem [y] or just install new packages [n=ENTER]:"
+  read FORMAT
+fi
+
+if [ "$FORMAT" = "y" ] ; then
+  execute mkfs.ext3 -F "$IMG"
+  execute mkdir -p ./mnt
+  execute mount -o loop "$IMG" ./mnt
+  echo
+  echo "Next up, use debootstrap to deploy the basics (note the arch and settings):"
+  echo
+  execute mkdir -p ./mnt/var/cache/apt
+  [ -d ./apt/archives ] && execute cp -Rf ./apt/archives ./mnt/var/cache/apt
+  execute mkdir -p ./mnt/var/lib/apt
+  [ -d ./apt/keyrings ] && execute cp -Rf ./apt/keyrings ./mnt/var/lib/apt
+  [ -d ./apt/lists ]    && execute cp -Rf ./apt/lists    ./mnt/var/lib/apt
+  #How debootstrap knows where to get arhcives ???
+  execute debootstrap --variant=minbase --foreign --arch $ARCH "$DIST" ./mnt
+else
+  echo
+  echo "Just mount filesystem image and chroot there"
+  echo
+  execute mkdir -p ./mnt
+  execute mount -o loop "$IMG" ./mnt
+fi
+
+execute cp /usr/bin/qemu-arm-static ./mnt/usr/bin
+
+execute cp init.chroot              ./mnt/
+execute chmod u+x ./mnt/init.chroot
+execute cp -v pkgs.[di]*            ./mnt/
+if [ -d ./cards/$CARD-$DIST ] ; then
+  execute cp -v ./cards/$CARD-$DIST/pkgs.[di]* ./mnt/
+fi
+
+#debootstrap deletes file /etc/apt/sources.list, so nee to walk around
+execute touch						  ./mnt/my_pkg_sources.list
+
+#FIXME - it always depends on SYSTEM,DIST,CARD
+PORTS="deb http://ports.ubuntu.com $DIST main restricted universe"
+if [ -r ./apt/sources.list ] ; then
+  execute cp ./apt/sources.list				  ./mnt/my_pkg_sources.list
+fi
+if [ -r ./cards/$CARD-$DIST/sources.list ] ; then
+  execute cat ./cards/$CARD-$DIST/sources.list		>>./mnt/my_pkg_sources.list
+fi
+if [ "$(grep "$PORTS" <./mnt/my_pkg_sources.list)" = "" ] ; then
+  execute echo "$PORTS"					>>./mnt/my_pkg_sources.list
+fi
+
+echo
+echo "And use it to finish the deployment:"
+echo
+execute chroot ./mnt /usr/bin/qemu-arm-static -cpu $CPU \
+ /bin/bash -c "\"/init.chroot $CARD $HOSTNAME $SYSTEM $DIST $LOC_LANG $LANGUAGE\""
+
+
+echo
+echo Get back downloaded packages and sources
+echo
+execute cp -Rn ./mnt/var/cache/apt/archives ./apt
+execute cp -Rn ./mnt/var/lib/apt/keyrings   ./apt
+execute cp -Rn ./mnt/var/lib/apt/lists      ./apt
+execute mkdir -p ./boot/$CARD-$DIST
+execute cp -Rf ./mnt/boot/*                ./boot/$CARD-$DIST
+
+echo
+echo "Copy some goods..."
+echo
+#For the root user
+if [ -d ./root ] ; then
+  execute cp -Rf ./root ./mnt/
+fi
+#For the admin user
+if [ -d ./home/admin ] ; then
+  execute cp -Rf ./home/admin ./mnt/home
+  execute chown -R 1000:1000 ./mnt/home/admin
+fi
+
+#Some system config files
+if [ -d ./etc ] ; then
+  execute cp -Rf ./etc ./mnt/
+fi
+
+#Create network interface
+if [ "$IFACE" != "" ] ; then
+  echo ""						>>./mnt/etc/network/interfaces
+  echo "auto $IFACE"					>>./mnt/etc/network/interfaces
+  echo "iface $IFACE inet $IFTYPE"			>>./mnt/etc/network/interfaces
+  if [ "$IFTYPE" = "static" ] ; then
+    [ "$IP" = "" ] && IP="192.168.1.2"
+    echo "    address $IP"				>>./mnt/etc/network/interfaces
+    [ "$MASK" = "" ] && MASK="255.255.255.0"
+    echo "    netmask $MASK"				>>./mnt/etc/network/interfaces
+    if [ "$GATEWAY" != "" ] ; then
+      echo "    gateway $GATEWAY"			>>./mnt/etc/network/interfaces
+    fi #GATEWAY
+    if [ "$DNS" != "" ] ; then
+      echo "    dns-nameservers $DNS"			>>./mnt/etc/network/interfaces
+    fi #DNS
+  fi #IFTYPE=static
+fi #IFACE
+
+echo
+echo "Save default locale settings"
+echo
+
+LC_ALL="$LOC_LANG.UTF-8"
+echo LANG="$LC_ALL"					>>./mnt/etc/default/locale
+echo LANGUAGE="$LANGUAGE"				 >./mnt/etc/default/locale
+echo LC_ADDRESS="$LC_ALL"				>>./mnt/etc/default/locale
+echo LC_IDENTIFICATION="$LC_ALL"			>>./mnt/etc/default/locale
+echo LC_MEASUREMENT="$LC_ALL"				>>./mnt/etc/default/locale
+echo LC_MONETARY="$LC_ALL"				>>./mnt/etc/default/locale
+echo LC_NAME="$LC_ALL"					>>./mnt/etc/default/locale
+echo LC_NUMERIC="$LC_ALL"				>>./mnt/etc/default/locale
+echo LC_PAPER="$LC_ALL"					>>./mnt/etc/default/locale
+echo LC_TELEPHONE="$LC_ALL"				>>./mnt/etc/default/locale
+echo LC_TIME="$LC_ALL"					>>./mnt/etc/default/locale
+
+
+
+
+echo
+echo "Created file \"/etc/default/locale\":"
+echo
+cat ./mnt/etc/default/locale
+
+if [ "$IP" != "" ] ; then
+  echo "$IP	$HOSTNAME"				>>./mnt/etc/hosts
+  if [ "$GATEWAY" != "" ] ; then
+    echo "$GATEWAY	defaultroute gw1"		>>./mnt/etc/hosts
+  fi
+  if [ "$DNS" != "" ] ; then
+    i=1
+    echo "#/etc/resolv.conf configured at startup"	 >./mnt/etc/resolv.conf
+    for addr in $DNS ; do
+      echo "$addr	nameserver$i ns$i"		>>./mnt/etc/hosts
+      echo "nameserver	$addr"				>>./mnt/etc/resolv.conf
+      i=$(($i+1))
+    done
+    have_resolv_conf=1
+  fi
+else
+  echo "127.0.0.1	$HOSTNAME"			 >./mnt/etc/hosts
+fi
+echo 
+echo "Created file \"/etc/hosts\":"
+cat ./mnt/etc/hosts
+
+if [ "$have_resolv_conf" = "1" ] ; then
+echo 
+echo "Created file \"/etc/resolv.conf\":"
+cat ./mnt/etc/resolv.conf
+fi
+
+echo "$HOSTNAME"					 >./mnt/etc/hostname
+
+echo 
+echo "Created file \"/etc/hostname\":"
+cat ./mnt/etc/hostname
+
+echo
+echo "clean & unmount"
+echo
+execute rm ./mnt/usr/bin/qemu-arm-static
+execute rm ./mnt/init.chroot
+execute umount ./mnt
+execute rmdir ./mnt
+
+echo
+echo "Now copy the image across (it should clock in at about 400MB compressed,"
+echo "in case you want to keep a copy around), replace the original Ubuntu image"
+echo "on your SD card, and you’re golden."
+echo
+

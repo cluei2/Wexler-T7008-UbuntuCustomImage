@@ -1,0 +1,12 @@
+lazarus
+lazarus-doc
+lazarus-ide
+lazarus-ide-gtk2
+lazarus-ide-qt4
+lazarus-src
+lcl
+lcl-gtk2
+lcl-nogui
+lcl-qt4
+lcl-units
+lcl-utils
