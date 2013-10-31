@@ -1,0 +1,13 @@
+#!/bin/bash
+
+WD=$PWD
+
+export ARCH=arm
+#export CROSS_COMPILE=arm-linux-gnueabihf-
+
+cd /usr/src/linux-source-3.8.0
+make clean
+make vexpress_defconfig
+make -j 4 all
+make install
+cd $WD

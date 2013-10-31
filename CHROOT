@@ -1,0 +1,20 @@
+#!/bin/bash
+
+. SYSTEM
+
+if [ ! -d ./mnt/usr/bin ] ; then
+  if [ ! -d ./mnt ] ; then
+    mkdir -p ./mnt
+  fi
+  sudo mount -o loop "$IMG" ./mnt
+  mounted=1
+fi
+
+sudo cp /usr/bin/qemu-arm-static ./mnt/usr/bin/
+sudo chroot ./mnt /usr/bin/qemu-arm-static -cpu cortex-a9 /bin/bash
+sudo rm ./mnt/usr/bin/qemu-arm-static
+
+if [ "$mounted" = "1" ] ; then
+  sudo umount ./mnt
+  sudo rm -rf ./mnt
+fi

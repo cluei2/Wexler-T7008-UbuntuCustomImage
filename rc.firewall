@@ -1,0 +1,105 @@
+#!/bin/sh
+
+###PATH=/usr/sbin:/sbin:/bin:/usr/bin
+
+ADDR=""
+MASK=""
+IFCONFIG="/sbin/ifconfig"
+
+if_addr() {
+
+  local IFC
+
+  IFC=$("$IFCONFIG" "$1"|grep "inet addr")
+  ADDR=${IFC#*addr:}
+  ADDR=${ADDR%% *}
+  MASK=${IFC#*Mask:}
+  MASK=${MASK%% *}
+}
+
+INT_IFACE="wlan0"
+EXT_IFACE="eth0"
+LO_IFACE="lo"
+
+if_addr "$INT_IFACE"
+INT_ADDR="$ADDR"
+INT_NET="$ADDR/$MASK"
+
+LXF="10.33.36.9"
+
+IPTABLES="/sbin/iptables"
+IP6TABLES="/sbin/ip6tables"
+
+#Разрешить динамические адреса на интерфейсах
+echo 1 > /proc/sys/net/ipv4/ip_dynaddr
+#Запретить передачу пакетов между интерфейсами
+echo 0 > /proc/sys/net/ipv4/ip_forward
+
+#Очистить все предыдущие директивы
+$IPTABLES -F 
+$IPTABLES -t nat -F 
+$IPTABLES -t mangle -F
+$IPTABLES -X 
+#Определить действия по умолчанию
+$IPTABLES -P INPUT DROP
+$IPTABLES -P FORWARD DROP
+$IPTABLES -P OUTPUT ACCEPT
+
+$IP6TABLES -F 
+$IP6TABLES -t mangle -F
+$IP6TABLES -X 
+$IP6TABLES -P INPUT DROP 
+$IP6TABLES -P FORWARD DROP 
+$IP6TABLES -P OUTPUT DROP
+
+#Принимать все пакеты на локальном интерфейсе
+$IPTABLES -A INPUT   -i $LO_IFACE  -j ACCEPT 
+
+#Принимать все пакеты на внутреннем интерфейсе
+$IPTABLES -A INPUT   -i $INT_IFACE -s $INT_NET -j ACCEPT
+
+#Перенаправлять пакеты от внутреннего интерфейса
+$IPTABLES -A FORWARD -i $INT_IFACE -s $INT_NET -j ACCEPT
+
+#--ВМЕСТО ПРЕДЫДУЩЕГО--#Фильтрация WiFi по MAC-адресу 
+#MAC_VAIO="2c:81:58:f2:09:7c"
+#MAC_HTC="90:21:55:02:e4:a7"
+#MAC_IBM="00:12:f0:27:c5:c4"
+#$IPTABLES -A FORWARD -i $INT_IFACE -m mac --mac-source $MAC_VAIO -j ACCEPT 
+#$IPTABLES -A FORWARD -i $INT_IFACE -m mac --mac-source $MAC_HTC  -j ACCEPT 
+#$IPTABLES -A FORWARD -i $INT_IFACE -m mac --mac-source $MAC_IBM  -j ACCEPT 
+
+#Принимать пакеты на всех интерфейсах для установленных соединений
+$IPTABLES -A INPUT   -m state --state ESTABLISHED,RELATED -j ACCEPT 
+
+#Перенаправлять пакеты на всех интерфейсах для установленных соединений
+$IPTABLES -A FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT 
+
+#Принимать TCP-пакеты на внешнем интерфейсе для перечисленных порртов (ftp=21)
+$IPTABLES -A INPUT -i $EXT_IFACE -p tcp  -m multiport --dports 22,80,443,8081,8082,51413  -j ACCEPT
+#Принимать UDP-пакеты на внешнем интерфейсе для перечисленных портов
+####$IPTABLES -A INPUT -i $EXT_IFACE -p udp  -m multiport --dports 1234,1235,1236,3000 -j ACCEPT
+#Принимать ICMP-пакеты (PING) на внешнем интерфейсе 
+$IPTABLES -A INPUT -i $EXT_IFACE -p icmp -j ACCEPT
+$IPTABLES -A INPUT -i $EXT_IFACE -p igmp -j ACCEPT
+
+#Для работы pptpd
+#Принимать пакеты из порта 47 "GRE" - обслуживание туннельного соединения
+$IPTABLES -A INPUT -i $EXT_IFACE -p gre -j ACCEPT
+#Принимать пакеты из порта 1723 - подключение pptpd
+$IPTABLES -A INPUT -i $EXT_IFACE -p tcp -m tcp --dport 1723 -j ACCEPT
+
+#Принимать TCP-пакеты на внешнем интерфейсе для перечисленных порртов
+$IPTABLES -A INPUT -i $EXT_IFACE -p tcp  -m multiport --dports 31579,31578 -j ACCEPT
+#Принимать UDP-пакеты на внешнем интерфейсе для перечисленных портов
+$IPTABLES -A INPUT -i $EXT_IFACE -p udp  -m multiport --dports 31579,31578 -j ACCEPT
+
+#Проброс SSH на ...9
+$IPTABLES -A PREROUTING -t nat -i $EXT_IFACE -p tcp --dport 22222 -j DNAT --to-destination $LXF:22
+$IPTABLES -A FORWARD -p tcp -d $LXF --dport 22 -j ACCEPT
+
+#Править адрес отправителя перед отправкой
+$IPTABLES -t nat -A POSTROUTING -o $EXT_IFACE -j MASQUERADE ##-j SNAT --to-source $EXT_IP - этот адрес неизвестен...
+
+#Разрешить передачу пакетов между интерфейсами
+echo 1 > /proc/sys/net/ipv4/ip_forward

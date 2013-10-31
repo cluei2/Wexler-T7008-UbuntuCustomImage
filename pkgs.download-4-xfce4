@@ -3,12 +3,17 @@ xfce4
 xfce4-goodies
 gtk3-engines-xfce
 gxmessage
+<<<<<<< HEAD
+=======
+network-manager-gnome
+>>>>>>> 1af2133e221ecb68b9b0c2cdd5048c44121f248e
 shiki-colors-xfwm-theme
 xfce4-cellmodem-plugin
 xfce4-messenger-plugin
 xfprint4
 xfswitch-plugin
 xfwm4-themes
+<<<<<<< HEAD
 
 system-config-date
 
@@ -24,3 +29,9 @@ language-pack-en
 language-pack-ru
 language-pack-gnome-en
 language-pack-gnome-ru
+=======
+gnome-icon-theme-full
+lightdm
+lightdm-gtk-greeter
+synaptic
+>>>>>>> 1af2133e221ecb68b9b0c2cdd5048c44121f248e
